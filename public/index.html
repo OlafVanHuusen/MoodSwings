@@ -24,6 +24,23 @@
       <p class="tagline">Play your feelings. Highest mood wins. First to three rounds takes it all.</p>
     </header>
 
+    <!-- account bar -->
+    <section class="auth-bar" id="auth-bar">
+      <div id="auth-out">
+        <input id="auth-user" maxlength="20" placeholder="username" autocomplete="username" />
+        <input id="auth-pass" type="password" placeholder="password" autocomplete="current-password" />
+        <button id="btn-login" class="ghost">Log in</button>
+        <button id="btn-register" class="ghost">Register</button>
+        <span class="auth-hint">an account unlocks duels, drafts &amp; team play</span>
+      </div>
+      <div id="auth-in" hidden>
+        <span>Signed in as <strong id="auth-name"></strong></span>
+        <a class="ghost linkbtn" href="/decks">My decks</a>
+        <button id="btn-logout" class="ghost">Log out</button>
+      </div>
+      <p id="auth-error" class="error" hidden></p>
+    </section>
+
     <!-- lobby view -->
     <section id="view-lobby" class="panels">
       <div class="panel panel-create">
@@ -33,18 +50,37 @@
           <input id="create-name" maxlength="20" placeholder="e.g. Moody Mark" autocomplete="off" />
         </label>
         <div class="field">
+          <span>Mode</span>
+          <div class="modegrid" id="mode-grid">
+            <button data-v="classic" class="on"><strong>Classic</strong><small>2–4 players · shared deck</small></button>
+            <button data-v="structure" data-auth="1"><strong>Structure Duel</strong><small>2 players · your own deck (45+)</small></button>
+            <button data-v="power" data-auth="1"><strong>Power Duel</strong><small>2 players · 12+ cards, singleton</small></button>
+            <button data-v="quickdraft" data-auth="1"><strong>Quick Draft</strong><small>2 players · pick &amp; pass, best of 3</small></button>
+            <button data-v="winston" data-auth="1"><strong>Winston Draft</strong><small>2 players · pile draft, best of 3</small></button>
+            <button data-v="team-open" data-auth="1"><strong>Open Team</strong><small>2 vs 2 · open hands with partner</small></button>
+            <button data-v="team-closed" data-auth="1"><strong>Closed Team</strong><small>2 vs 2 · hidden hands, pass two</small></button>
+          </div>
+          <p class="mode-note" id="mode-note"></p>
+        </div>
+        <div class="field" id="field-players">
           <span>Players</span>
           <div class="seg" id="seg-players">
             <button data-v="2" class="on">2</button><button data-v="3">3</button><button data-v="4">4</button>
           </div>
         </div>
-        <div class="field">
+        <div class="field" id="field-deckmode">
           <span>Deck</span>
           <div class="seg seg-wide" id="seg-deck">
             <button data-v="random45" class="on" title="A fresh random 45-card deck with the official rarity mix">Random 45</button>
             <button data-v="full" title="Every one of the 133 cards shuffled together">All 133</button>
           </div>
         </div>
+        <div class="field" id="field-deck" hidden>
+          <span>Your deck</span>
+          <select id="create-deck"></select>
+          <p class="deck-hint" id="create-deck-hint"></p>
+        </div>
+        <p id="create-error" class="error" hidden></p>
         <button id="btn-create" class="cta">Create game</button>
       </div>
 
@@ -54,6 +90,10 @@
           <span>Your name</span>
           <input id="join-name" maxlength="20" placeholder="e.g. Grumpy Greta" autocomplete="off" />
         </label>
+        <div class="field" id="field-join-deck" hidden>
+          <span>Your deck (for duel tables)</span>
+          <select id="join-deck"></select>
+        </div>
         <div class="open-games">
           <span class="field-label">Open tables</span>
           <ul id="open-list"><li class="empty">No one is waiting yet…</li></ul>
@@ -69,6 +109,7 @@
     <!-- waiting room view -->
     <section id="view-wait" class="waitroom" hidden>
       <h2>Table <span id="wait-code" class="code"></span></h2>
+      <p class="wait-mode" id="wait-mode"></p>
       <p class="wait-hint">Share this code — the game starts the moment everyone sits down.</p>
       <ul id="wait-players" class="wait-players"></ul>
       <p class="wait-spinner"><span></span><span></span><span></span></p>

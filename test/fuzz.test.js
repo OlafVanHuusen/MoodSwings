@@ -4,6 +4,7 @@
 import test from "node:test";
 import assert from "node:assert";
 import { Game } from "../server/engine/game.js";
+import { buildDeck, POOL, shuffle } from "../server/gamedata.js";
 
 function randomAnswer(spec, rng = Math.random) {
   const pick = (arr) => arr[Math.floor(rng() * arr.length)];
@@ -54,6 +55,11 @@ function checkInvariants(g) {
     seen.set(iid, zone);
   };
   for (const iid of g.deck) note(iid, "deck");
+  if (g.playerDecks) {
+    for (let s = 0; s < g.playerDecks.length; s++) {
+      for (const iid of g.playerDecks[s]) note(iid, `deck${s}`);
+    }
+  }
   for (const iid of g.discard) note(iid, "discard");
   if (g.staging != null) note(g.staging, "staging");
   for (const p of g.players) {
@@ -83,7 +89,7 @@ function checkInvariants(g) {
   }
 }
 
-async function runGame({ players, deckMode, seed, maxPrompts = 8000 }) {
+async function runGame({ players, deckMode, mode = "classic", deckLists = null, seed, maxPrompts = 8000 }) {
   // deterministic-ish rng
   let s = seed;
   const rng = () => {
@@ -91,7 +97,7 @@ async function runGame({ players, deckMode, seed, maxPrompts = 8000 }) {
     return s / 4294967296;
   };
 
-  const g = new Game({ playerCount: players, deckMode, onUpdate() {}, onLog() {} });
+  const g = new Game({ playerCount: players, deckMode, mode, deckLists, onUpdate() {}, onLog() {} });
   for (let i = 0; i < players; i++) g.addPlayer(`P${i + 1}`);
 
   let prompts = 0;
@@ -145,7 +151,12 @@ async function runGame({ players, deckMode, seed, maxPrompts = 8000 }) {
   await finished;
   checkInvariants(g);
   assert.ok(g.gameWinner != null, "game ended with a winner");
-  assert.ok(g.players[g.gameWinner].roundWins >= 3, "winner has 3+ round wins");
+  if (g.teamMode) {
+    assert.ok(g.gameWinnerTeam != null, "team game has a winning team");
+    assert.ok(g.teamWins[g.gameWinnerTeam] >= 3, "winning team has 3+ round wins");
+  } else {
+    assert.ok(g.players[g.gameWinner].roundWins >= 3, "winner has 3+ round wins");
+  }
   return { rounds: g.round, prompts };
 }
 
@@ -154,7 +165,8 @@ const N = Number(process.env.FUZZ_N || 12);
 test("fuzz: 2-player random45 games complete", async () => {
   for (let seed = 1; seed <= N; seed++) {
     const r = await runGame({ players: 2, deckMode: "random45", seed });
-    assert.ok(r.rounds >= 3);
+    // Corruption (#60) doubles a round win, so games can legally end in 2 rounds
+    assert.ok(r.rounds >= 2);
   }
 });
 
@@ -167,5 +179,49 @@ test("fuzz: 3-player full-deck games complete", async () => {
 test("fuzz: 4-player games complete", async () => {
   for (let seed = 200; seed <= 200 + Math.ceil(N / 2); seed++) {
     await runGame({ players: 4, deckMode: "random45", seed });
+  }
+});
+
+test("fuzz: structure-duel games complete (own 45-card decks)", async () => {
+  for (let seed = 300; seed <= 300 + Math.ceil(N / 2); seed++) {
+    await runGame({
+      players: 2,
+      mode: "duel",
+      deckLists: [buildDeck("random45"), buildDeck("random45")],
+      seed,
+    });
+  }
+});
+
+test("fuzz: power-duel games complete (12-card singleton decks)", async () => {
+  for (let seed = 400; seed <= 400 + Math.ceil(N / 2); seed++) {
+    await runGame({
+      players: 2,
+      mode: "duel",
+      deckLists: [shuffle([...POOL]).slice(0, 12), shuffle([...POOL]).slice(0, 12)],
+      seed,
+    });
+  }
+});
+
+test("fuzz: duel decks may contain duplicates", async () => {
+  const dupes = () => {
+    const base = shuffle([...POOL]).slice(0, 8);
+    return [...base, ...base.slice(0, 6)]; // 14 cards, 6 duplicated
+  };
+  for (let seed = 500; seed <= 500 + Math.ceil(N / 4); seed++) {
+    await runGame({ players: 2, mode: "duel", deckLists: [dupes(), dupes()], seed });
+  }
+});
+
+test("fuzz: open team games complete", async () => {
+  for (let seed = 600; seed <= 600 + Math.ceil(N / 2); seed++) {
+    await runGame({ players: 4, deckMode: "random45", mode: "team-open", seed });
+  }
+});
+
+test("fuzz: closed team games complete", async () => {
+  for (let seed = 700; seed <= 700 + Math.ceil(N / 2); seed++) {
+    await runGame({ players: 4, deckMode: "random45", mode: "team-closed", seed });
   }
 });

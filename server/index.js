@@ -1,11 +1,13 @@
-// Express + Socket.IO server: lobby management and game session relay.
+// Express + Socket.IO server: auth/deck API, lobby management, match relay.
 import express from "express";
 import { createServer } from "node:http";
 import { Server } from "socket.io";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { Game } from "./engine/game.js";
+import { api, sessionUser } from "./api.js";
+import { getDeck } from "./db.js";
+import { Match, MODES, deckProblem } from "./match.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -13,12 +15,17 @@ const http = createServer(app);
 const io = new Server(http);
 
 app.use(express.static(path.join(__dirname, "..", "public")));
+app.use("/api", api);
 app.get("/game/:code", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "game.html"));
 });
+app.get("/decks", (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "decks.html"));
+});
 
 // ---- lobby state ----
-// code -> { code, hostName, playerCount, deckMode, players: [{token, name, seat, socket}], game, started }
+// code -> { code, mode, playerCount, deckMode, players: [{token, name, seat, socket,
+//           userId, deckCards}], match, started }
 const rooms = new Map();
 
 function genCode() {
@@ -37,7 +44,11 @@ function lobbyList() {
       hostName: r.players[0]?.name ?? "?",
       playerCount: r.playerCount,
       joined: r.players.length,
+      mode: r.mode,
+      modeLabel: MODES[r.mode].label,
       deckMode: r.deckMode,
+      needsAuth: MODES[r.mode].auth,
+      needsDeck: MODES[r.mode].kind === "duel",
     }));
 }
 
@@ -48,34 +59,39 @@ function broadcastLobby() {
 function roomState(room) {
   return {
     code: room.code,
+    mode: room.mode,
+    modeLabel: MODES[room.mode].label,
     playerCount: room.playerCount,
     deckMode: room.deckMode,
     started: room.started,
+    teams: MODES[room.mode].kind === "team",
+    teamPattern: room.mode === "team-open" ? "adjacent" : room.mode === "team-closed" ? "across" : null,
     players: room.players.map((p) => ({ name: p.name, seat: p.seat, connected: !!p.socket })),
   };
 }
 
-function pushGame(room) {
+function pushMatch(room) {
   for (const p of room.players) {
-    if (p.socket) p.socket.emit("gameState", room.game.stateFor(p.seat));
+    if (!p.socket) continue;
+    p.socket.emit("matchState", room.match.stateFor(p.seat));
+    if (room.match.game) p.socket.emit("gameState", room.match.game.stateFor(p.seat));
   }
 }
 
-function startGame(room) {
+function startMatch(room) {
   room.started = true;
-  room.game = new Game({
+  room.match = new Match({
+    mode: room.mode,
     playerCount: room.playerCount,
     deckMode: room.deckMode,
-    onUpdate: () => pushGame(room),
-    onLog: () => pushGame(room),
-    onGameOver: () => pushGame(room),
+    players: room.players.map((p) => ({ seat: p.seat, name: p.name, deckCards: p.deckCards })),
+    onUpdate: () => pushMatch(room),
   });
-  for (const p of room.players) p.seat = room.game.addPlayer(p.name);
   for (const p of room.players) {
     if (p.socket) p.socket.emit("gameStarted", { code: room.code, token: p.token });
   }
   broadcastLobby();
-  room.game.start();
+  room.match.start();
 }
 
 /** Remove a socket's player from its current un-started room (if any). */
@@ -94,25 +110,47 @@ function dropFromWaitingRoom(socket) {
   broadcastLobby();
 }
 
+/** Resolve and validate the deck a logged-in player brings to a duel room. */
+function resolveDeck(mode, user, deckId) {
+  if (MODES[mode].kind !== "duel") return { deckCards: null };
+  const deck = getDeck(user.id, Number(deckId));
+  if (!deck) return { error: "Pick one of your decks for this format." };
+  const problem = deckProblem(mode, deck.cards);
+  if (problem) return { error: problem };
+  return { deckCards: deck.cards };
+}
+
+io.use((socket, next) => {
+  socket.data.user = sessionUser(socket.request.headers.cookie);
+  next();
+});
+
 io.on("connection", (socket) => {
   socket.on("enterLobby", () => {
     socket.join("lobby");
     socket.emit("lobbyList", lobbyList());
   });
 
-  socket.on("createGame", ({ name, playerCount, deckMode }, cb) => {
+  socket.on("createGame", ({ name, mode, playerCount, deckMode, deckId }, cb) => {
     dropFromWaitingRoom(socket);
-    name = String(name || "").trim().slice(0, 20) || "Player";
-    playerCount = Math.min(4, Math.max(2, Number(playerCount) || 2));
+    mode = MODES[mode] ? mode : "classic";
+    const def = MODES[mode];
+    const user = socket.data.user;
+    if (def.auth && !user) return cb?.({ ok: false, error: "Log in to play this mode." });
+    name = String(name || user?.username || "").trim().slice(0, 20) || "Player";
+    playerCount = def.players.includes(Number(playerCount)) ? Number(playerCount) : def.players[0];
     deckMode = deckMode === "full" ? "full" : "random45";
+    const { deckCards, error } = resolveDeck(mode, user, deckId);
+    if (error) return cb?.({ ok: false, error });
     const code = genCode();
     const token = crypto.randomUUID();
     const room = {
       code,
+      mode,
       playerCount,
       deckMode,
-      players: [{ token, name, seat: 0, socket }],
-      game: null,
+      players: [{ token, name, seat: 0, socket, userId: user?.id ?? null, deckCards }],
+      match: null,
       started: false,
     };
     rooms.set(code, room);
@@ -124,22 +162,35 @@ io.on("connection", (socket) => {
     broadcastLobby();
   });
 
-  socket.on("joinGame", ({ code, name }, cb) => {
+  socket.on("joinGame", ({ code, name, deckId }, cb) => {
     dropFromWaitingRoom(socket);
     const room = rooms.get(String(code || "").toUpperCase());
     if (!room) return cb?.({ ok: false, error: "Game not found." });
     if (room.started) return cb?.({ ok: false, error: "Game already started." });
     if (room.players.length >= room.playerCount) return cb?.({ ok: false, error: "Game is full." });
-    name = String(name || "").trim().slice(0, 20) || `Player ${room.players.length + 1}`;
+    const def = MODES[room.mode];
+    const user = socket.data.user;
+    if (def.auth && !user) return cb?.({ ok: false, error: "Log in to play this mode." });
+    const { deckCards, error } = resolveDeck(room.mode, user, deckId);
+    if (error) return cb?.({ ok: false, error });
+    name =
+      String(name || user?.username || "").trim().slice(0, 20) || `Player ${room.players.length + 1}`;
     const token = crypto.randomUUID();
-    room.players.push({ token, name, seat: room.players.length, socket });
+    room.players.push({
+      token,
+      name,
+      seat: room.players.length,
+      socket,
+      userId: user?.id ?? null,
+      deckCards,
+    });
     socket.data.room = room;
     socket.data.token = token;
     socket.join(`room:${room.code}`);
     cb?.({ ok: true, code: room.code, token });
     io.to(`room:${room.code}`).emit("roomState", roomState(room));
     broadcastLobby();
-    if (room.players.length === room.playerCount) startGame(room);
+    if (room.players.length === room.playerCount) startMatch(room);
   });
 
   // game page (re)connect: client supplies room code + player token
@@ -154,7 +205,8 @@ io.on("connection", (socket) => {
     socket.join(`room:${room.code}`);
     cb?.({ ok: true, seat: player.seat, started: room.started });
     if (room.started) {
-      socket.emit("gameState", room.game.stateFor(player.seat));
+      socket.emit("matchState", room.match.stateFor(player.seat));
+      if (room.match.game) socket.emit("gameState", room.match.game.stateFor(player.seat));
     } else {
       io.to(`room:${room.code}`).emit("roomState", roomState(room));
     }
@@ -162,11 +214,15 @@ io.on("connection", (socket) => {
 
   socket.on("promptAnswer", (answer) => {
     const room = socket.data.room;
-    if (!room?.game) return;
+    if (!room?.match) return;
     const player = room.players.find((p) => p.token === socket.data.token);
     if (!player) return;
-    const ok = room.game.answerPrompt(player.seat, answer);
-    if (!ok) socket.emit("gameState", room.game.stateFor(player.seat)); // resync on bad answer
+    const ok = room.match.answer(player.seat, answer);
+    if (!ok) {
+      // resync on bad answer
+      socket.emit("matchState", room.match.stateFor(player.seat));
+      if (room.match.game) socket.emit("gameState", room.match.game.stateFor(player.seat));
+    }
   });
 
   socket.on("leaveRoom", () => dropFromWaitingRoom(socket));

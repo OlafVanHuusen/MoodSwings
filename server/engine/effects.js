@@ -574,7 +574,7 @@ export const effects = {
       for (const c of picks) g.discardFromHand(seat, c);
     },
     afterPlay: async (g, iid, seat) => {
-      const elig = g.opponentsOf(seat).flatMap((s) => g.moodsOf(s));
+      const elig = g.enemiesOf(seat).flatMap((s) => g.moodsOf(s));
       const pick = await g.chooseMood(seat, { eligible: elig, text: "Choose an opponent's mood. It becomes yours." });
       if (pick != null) g.giveMood(pick, seat);
     },
@@ -612,7 +612,7 @@ export const effects = {
   43: {
     // Indecisiveness: chosen opponents with 2+ moods bounce a random mood
     afterPlay: async (g, iid, seat) => {
-      const elig = g.opponentsOf(seat).filter((s) => g.moodsOf(s).length >= 2);
+      const elig = g.enemiesOf(seat).filter((s) => g.moodsOf(s).length >= 2);
       const picks = await g.choosePlayers(seat, {
         eligible: elig,
         min: 0,
@@ -686,7 +686,7 @@ export const effects = {
     // Regret: cost — bounce two of your moods; steal-to-hand an opponent's mood
     ...moodCost({ min: 2, dest: "hand", what: "two of your moods into your hand" }),
     afterPlay: async (g, iid, seat) => {
-      const elig = g.opponentsOf(seat).flatMap((s) => g.moodsOf(s));
+      const elig = g.enemiesOf(seat).flatMap((s) => g.moodsOf(s));
       const pick = await g.chooseMood(seat, { eligible: elig, text: "Put an opponent's mood into YOUR hand." });
       if (pick != null) g.toHand(pick, seat);
     },
@@ -696,7 +696,7 @@ export const effects = {
     // Sneakiness: after scoring, swap scores with chosen opponent
     afterPlay: async (g, iid, seat) => {
       const pick = await g.choosePlayer(seat, {
-        eligible: g.opponentsOf(seat),
+        eligible: g.enemiesOf(seat),
         text: "Choose an opponent to swap scores with after scoring this round.",
       });
       g.afterScoringQueue.push({ kind: "sneakiness", iid, seat, target: pick, n: g.mood.get(iid).playedN });
@@ -856,7 +856,7 @@ export const effects = {
   61: {
     // Cruelty: chosen opponents with 2+ moods discard a random mood
     afterPlay: async (g, iid, seat) => {
-      const elig = g.opponentsOf(seat).filter((s) => g.moodsOf(s).length >= 2);
+      const elig = g.enemiesOf(seat).filter((s) => g.moodsOf(s).length >= 2);
       const picks = await g.choosePlayers(seat, {
         eligible: elig,
         min: 0,
@@ -882,7 +882,7 @@ export const effects = {
         text: "Put a discard pile card into an opponent's hand to set this value to 6? (Skip to decline.)",
       });
       if (!picks.length) return;
-      const to = await g.choosePlayer(seat, { eligible: g.opponentsOf(seat), text: "Whose hand?" });
+      const to = await g.choosePlayer(seat, { eligible: g.enemiesOf(seat), text: "Whose hand?" });
       g.toHand(picks[0], to);
       g.mood.get(iid).valueSet = 6;
       g.log(`${g.nameOf(iid)}'s value becomes 6.`);
@@ -896,7 +896,7 @@ export const effects = {
     ...moodCost({ min: 1, dest: "discard", what: "one of your moods into the discard pile" }),
     bonus: (g, iid) => {
       const seat = g.controllerOf(iid);
-      const most = Math.max(0, ...g.opponentsOf(seat).map((s) => g.moodsOf(s).length));
+      const most = Math.max(0, ...g.enemiesOf(seat).map((s) => g.moodsOf(s).length));
       return 2 * most;
     },
   },
@@ -1104,7 +1104,7 @@ export const effects = {
     // Animosity: secondary if any opponent has 3+ cards in hand
     value: (g, iid) => {
       const seat = g.controllerOf(iid);
-      return g.opponentsOf(seat).some((s) => g.player(s).hand.length >= 3)
+      return g.enemiesOf(seat).some((s) => g.player(s).hand.length >= 3)
         ? g.def(iid).secondary
         : g.def(iid).primary;
     },
@@ -1113,7 +1113,7 @@ export const effects = {
   82: {
     // Arrogance: borrow a white/blue mood; give it back when this leaves play
     afterPlay: async (g, iid, seat) => {
-      const elig = g.opponentsOf(seat).filter((s) =>
+      const elig = g.enemiesOf(seat).filter((s) =>
         g.moodsOf(s).some((m) => ["White", "Blue"].includes(g.colorOf(m)))
       );
       const pick = await g.choosePlayer(seat, {
@@ -1267,7 +1267,7 @@ export const effects = {
   96: {
     // Instability: pick two moods of one opponent; they give you one, you give one back
     afterPlay: async (g, iid, seat) => {
-      const elig = g.opponentsOf(seat).filter((s) => g.moodsOf(s).length >= 2);
+      const elig = g.enemiesOf(seat).filter((s) => g.moodsOf(s).length >= 2);
       const opp = await g.choosePlayer(seat, {
         eligible: elig,
         optional: true,
@@ -1321,7 +1321,7 @@ export const effects = {
     // Recklessness: borrow an opponent's mood until after scoring; after scoring,
     // whoever holds this bottom-decks it and draws
     afterPlay: async (g, iid, seat) => {
-      const elig = g.opponentsOf(seat).flatMap((s) => g.moodsOf(s));
+      const elig = g.enemiesOf(seat).flatMap((s) => g.moodsOf(s));
       const pick = await g.chooseMood(seat, {
         eligible: elig,
         optional: true,
@@ -1504,7 +1504,7 @@ export const effects = {
     // Generosity: chosen opponent may play an extra mood next turn
     afterPlay: async (g, iid, seat) => {
       const pick = await g.choosePlayer(seat, {
-        eligible: g.opponentsOf(seat),
+        eligible: g.enemiesOf(seat),
         text: "Choose an opponent. They may play an additional mood on their next turn.",
       });
       if (pick == null) return;
