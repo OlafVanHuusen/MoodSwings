@@ -15,11 +15,27 @@
   <header class="topbar">
     <a class="brand" href="/">Mood&nbsp;Swings</a>
     <div id="round-info" class="round-info"></div>
+    <div id="match-info" class="match-info" hidden></div>
     <div id="doubt-banner" class="doubt-banner" hidden></div>
     <div id="seats" class="seats"></div>
   </header>
 
-  <main class="board">
+  <!-- match phases: drafting, deck building, sideboarding -->
+  <section id="match-view" class="match-view" hidden>
+    <div class="match-inner">
+      <h2 id="match-title"></h2>
+      <p id="match-sub"></p>
+      <p id="match-prompt-text" class="match-prompt"></p>
+      <div id="match-grid" class="overlay-grid"></div>
+      <div id="match-actions" class="overlay-actions"></div>
+      <div class="match-poolwrap" id="match-poolwrap" hidden>
+        <h3 id="match-pool-label"></h3>
+        <div id="match-pool" class="overlay-grid"></div>
+      </div>
+    </div>
+  </section>
+
+  <main class="board" id="board">
     <section id="opponents" class="opponents"></section>
 
     <section class="middle">

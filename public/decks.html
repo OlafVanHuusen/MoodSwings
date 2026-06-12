@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mood Swings — My Decks</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Shantell+Sans:ital,wght@0,400..800;1,400..800&family=Karla:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="decks">
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/">Mood&nbsp;Swings</a>
+    <div class="round-info">Deck builder</div>
+    <div class="deckbar-right">
+      <span id="deck-user"></span>
+      <a class="ghost linkbtn" href="/">Back to lobby</a>
+    </div>
+  </header>
+
+  <main class="decks-main">
+    <aside class="deck-list">
+      <h2>My decks</h2>
+      <ul id="deck-list"></ul>
+      <button id="btn-new-deck" class="cta">New deck</button>
+    </aside>
+
+    <section class="deck-editor" id="deck-editor" hidden>
+      <div class="deck-editor-head">
+        <input id="deck-name" maxlength="40" placeholder="Deck name" />
+        <div class="deck-stats">
+          <span id="deck-count" class="deck-count">0 cards</span>
+          <span id="deck-formats" class="deck-formats"></span>
+        </div>
+        <div class="deck-editor-actions">
+          <button id="btn-save-deck" class="cta cta-small">Save</button>
+          <button id="btn-delete-deck" class="ghost">Delete</button>
+        </div>
+      </div>
+      <p id="deck-error" class="error" hidden></p>
+
+      <div class="deck-current">
+        <h3>In this deck <small>(click a card to remove one copy)</small></h3>
+        <div id="deck-cards" class="deck-cards"></div>
+      </div>
+
+      <div class="deck-pool">
+        <h3>All 133 cards <small>(click to add — duplicates allowed, no limits)</small></h3>
+        <div class="deck-filters">
+          <input id="card-search" placeholder="search name or text…" />
+          <div class="seg" id="seg-color">
+            <button data-v="" class="on">All</button>
+            <button data-v="White">W</button>
+            <button data-v="Blue">U</button>
+            <button data-v="Black">B</button>
+            <button data-v="Red">R</button>
+            <button data-v="Green">G</button>
+          </div>
+        </div>
+        <div id="card-pool" class="card-pool"></div>
+      </div>
+    </section>
+
+    <section class="deck-editor deck-empty" id="deck-empty">
+      <p>Pick a deck on the left, or create a new one. Decks are used for Structure Duel (45+ cards) and Power Duel (12+ cards, one of each).</p>
+    </section>
+  </main>
+
+  <!-- card zoom -->
+  <div id="zoom" class="zoom" hidden><img id="zoom-img" alt="" /><div id="zoom-meta"></div></div>
+
+  <script src="/js/decks.js"></script>
+</body>
+</html>
