@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mood Swings — Table</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Shantell+Sans:ital,wght@0,400..800;1,400..800&family=Karla:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="table">
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/">Mood&nbsp;Swings</a>
+    <div id="round-info" class="round-info"></div>
+    <div id="doubt-banner" class="doubt-banner" hidden></div>
+    <div id="seats" class="seats"></div>
+  </header>
+
+  <main class="board">
+    <section id="opponents" class="opponents"></section>
+
+    <section class="middle">
+      <div class="piles">
+        <div class="pile" id="deck-pile" title="Deck">
+          <div class="cardback"></div>
+          <span id="deck-count" class="pile-count"></span>
+          <span class="pile-label">deck</span>
+        </div>
+        <div class="pile" id="discard-pile" title="Discard pile — click to browse">
+          <div id="discard-top" class="discard-top empty"></div>
+          <span id="discard-count" class="pile-count"></span>
+          <span class="pile-label">discard</span>
+        </div>
+      </div>
+      <div id="status-line" class="status-line"></div>
+      <aside class="logwrap">
+        <h3>Table talk</h3>
+        <ul id="log"></ul>
+      </aside>
+    </section>
+
+    <section class="me">
+      <div id="my-moods" class="my-moods"></div>
+      <div class="handwrap">
+        <div id="my-hand" class="my-hand"></div>
+        <div id="action-bar" class="action-bar"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- prompt sheet -->
+  <div id="prompt-sheet" class="prompt-sheet" hidden>
+    <p id="prompt-text"></p>
+    <div id="prompt-body"></div>
+    <div id="prompt-actions"></div>
+  </div>
+
+  <!-- discard / picker overlay -->
+  <div id="overlay" class="overlay" hidden>
+    <div class="overlay-inner">
+      <header><h3 id="overlay-title"></h3><button id="overlay-close" class="ghost">close</button></header>
+      <div id="overlay-grid" class="overlay-grid"></div>
+      <div id="overlay-actions" class="overlay-actions"></div>
+    </div>
+  </div>
+
+  <!-- card zoom -->
+  <div id="zoom" class="zoom" hidden><img id="zoom-img" alt="" /><div id="zoom-meta"></div></div>
+
+  <!-- game over -->
+  <div id="gameover" class="gameover" hidden>
+    <div class="gameover-card">
+      <p class="kicker">the table has spoken</p>
+      <h1 id="winner-name" class="wordmark small"></h1>
+      <p id="winner-sub"></p>
+      <a class="cta" href="/">Back to the lobby</a>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/game.js"></script>
+</body>
+</html>

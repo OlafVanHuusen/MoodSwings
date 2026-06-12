@@ -1,0 +1,22 @@
+# Claude / project-local docs
+CLAUDE.md
+docs/
+.claude/
+
+# Dependencies
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+
+# Scraped card data + scans (from moodiest.app, not redistributable — run `npm run scrape`)
+data/
+public/cards/
+
+# Junk
+*.stackdump
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

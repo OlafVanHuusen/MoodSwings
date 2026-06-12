@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mood Swings — Play Online</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Shantell+Sans:ital,wght@0,400..800;1,400..800&family=Karla:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="landing">
+  <div class="mood-blobs" aria-hidden="true">
+    <span class="blob b-white"></span><span class="blob b-blue"></span><span class="blob b-black"></span><span class="blob b-red"></span><span class="blob b-green"></span>
+  </div>
+  <div class="grain" aria-hidden="true"></div>
+
+  <main class="landing-main">
+    <header class="hero">
+      <p class="kicker">an unofficial fan table for the secret lair game</p>
+      <h1 class="wordmark" aria-label="Mood Swings">
+        <span>M</span><span>o</span><span>o</span><span>d</span><span class="gap">&nbsp;</span><span>S</span><span>w</span><span>i</span><span>n</span><span>g</span><span>s</span>
+      </h1>
+      <p class="tagline">Play your feelings. Highest mood wins. First to three rounds takes it all.</p>
+    </header>
+
+    <!-- lobby view -->
+    <section id="view-lobby" class="panels">
+      <div class="panel panel-create">
+        <h2>Create a game</h2>
+        <label class="field">
+          <span>Your name</span>
+          <input id="create-name" maxlength="20" placeholder="e.g. Moody Mark" autocomplete="off" />
+        </label>
+        <div class="field">
+          <span>Players</span>
+          <div class="seg" id="seg-players">
+            <button data-v="2" class="on">2</button><button data-v="3">3</button><button data-v="4">4</button>
+          </div>
+        </div>
+        <div class="field">
+          <span>Deck</span>
+          <div class="seg seg-wide" id="seg-deck">
+            <button data-v="random45" class="on" title="A fresh random 45-card deck with the official rarity mix">Random 45</button>
+            <button data-v="full" title="Every one of the 133 cards shuffled together">All 133</button>
+          </div>
+        </div>
+        <button id="btn-create" class="cta">Create game</button>
+      </div>
+
+      <div class="panel panel-join">
+        <h2>Join a game</h2>
+        <label class="field">
+          <span>Your name</span>
+          <input id="join-name" maxlength="20" placeholder="e.g. Grumpy Greta" autocomplete="off" />
+        </label>
+        <div class="open-games">
+          <span class="field-label">Open tables</span>
+          <ul id="open-list"><li class="empty">No one is waiting yet…</li></ul>
+        </div>
+        <div class="join-code">
+          <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" />
+          <button id="btn-join" class="cta cta-small">Join</button>
+        </div>
+        <p id="join-error" class="error" hidden></p>
+      </div>
+    </section>
+
+    <!-- waiting room view -->
+    <section id="view-wait" class="waitroom" hidden>
+      <h2>Table <span id="wait-code" class="code"></span></h2>
+      <p class="wait-hint">Share this code — the game starts the moment everyone sits down.</p>
+      <ul id="wait-players" class="wait-players"></ul>
+      <p class="wait-spinner"><span></span><span></span><span></span></p>
+      <button id="btn-leave" class="ghost">Leave table</button>
+    </section>
+
+    <footer class="site-foot">
+      <p>Unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards.
+         Card images and game design &copy; Wizards of the Coast LLC. Card data &amp; scans via <a href="https://moodiest.app" target="_blank" rel="noopener">moodiest.app</a>.</p>
+    </footer>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/landing.js"></script>
+</body>
+</html>
