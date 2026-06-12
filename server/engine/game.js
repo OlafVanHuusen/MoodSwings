@@ -7,17 +7,24 @@ import { effects, hopeGrant, graceGrant } from "./effects.js";
 let IID = 0;
 
 export class Game {
-  constructor({ playerCount, deckMode, onUpdate, onLog, onGameOver }) {
+  // mode: 'classic' (shared deck), 'duel' (per-player decks via deckLists),
+  // 'team-open' / 'team-closed' (4 players in two teams, shared deck)
+  constructor({ playerCount, deckMode, mode = "classic", deckLists = null, onUpdate, onLog, onGameOver }) {
     this.playerCount = playerCount;
     this.deckMode = deckMode;
+    this.mode = mode;
+    this.duel = mode === "duel";
+    this.teamMode = mode === "team-open" || mode === "team-closed";
+    this.deckLists = deckLists; // duel: card numbers per seat
     this.onUpdate = onUpdate || (() => {});
     this.onLog = onLog || (() => {});
     this.onGameOver = onGameOver || (() => {});
 
     this.players = []; // {seat, name, hand:[iid], roundWins, hurtFeelings, nextTurnPlays, gen: extra play grants for next turn}
-    this.deck = []; // iid[], index 0 = top
-    this.discard = []; // iid[]
-    this.insts = new Map(); // iid -> {iid, num}
+    this.deck = []; // iid[], index 0 = top (shared modes)
+    this.playerDecks = null; // duel: per-seat iid[], index 0 = top
+    this.discard = []; // iid[] (duel rules treat both players' piles as one)
+    this.insts = new Map(); // iid -> {iid, num, owner (duel: seat whose deck the card came from)}
     this.mood = new Map(); // iid -> mood state while in play
 
     this.round = 0;
@@ -35,6 +42,10 @@ export class Game {
     this.nextFirstOverride = null; // set by Awe
     this.corruptionDouble = false;
     this.gameWinner = null;
+    this.gameWinnerTeam = null;
+    this.teamWins = [0, 0]; // team modes
+    this.lastWinnerTeam = null;
+    this.roundFirstTeam = null; // team that took the first turn this round (tie-break)
     this.logLines = [];
   }
 
@@ -55,17 +66,30 @@ export class Game {
   }
 
   start() {
-    const nums = buildDeck(this.deckMode);
-    this.deck = nums.map((num) => {
-      const iid = ++IID;
-      this.insts.set(iid, { iid, num });
-      return iid;
-    });
-    const bottom = this.def(this.deck[this.deck.length - 1]);
-    this.firstSeat = Math.floor(Math.random() * this.players.length);
-    this.log(
-      `The bottom card of the deck is ${bottom.name}. Whoever most recently felt ${bottom.name.toLowerCase()} would choose the first player — we chose ${this.players[this.firstSeat].name} at random.`
-    );
+    if (this.duel) {
+      this.playerDecks = this.players.map((p) => {
+        const nums = shuffle([...this.deckLists[p.seat]]);
+        return nums.map((num) => {
+          const iid = ++IID;
+          this.insts.set(iid, { iid, num, owner: p.seat });
+          return iid;
+        });
+      });
+      this.firstSeat = Math.floor(Math.random() * this.players.length);
+      this.log(`${this.players[this.firstSeat].name} was chosen at random to go first.`);
+    } else {
+      const nums = buildDeck(this.deckMode);
+      this.deck = nums.map((num) => {
+        const iid = ++IID;
+        this.insts.set(iid, { iid, num });
+        return iid;
+      });
+      const bottom = this.def(this.deck[this.deck.length - 1]);
+      this.firstSeat = Math.floor(Math.random() * this.players.length);
+      this.log(
+        `The bottom card of the deck is ${bottom.name}. Whoever most recently felt ${bottom.name.toLowerCase()} would choose the first player — we chose ${this.players[this.firstSeat].name} at random.`
+      );
+    }
     for (const p of this.players) this.drawCards(p.seat, 5, true);
     this.phase = "playing";
     this.run().catch((e) => {
@@ -98,8 +122,45 @@ export class Game {
     return this.players[seat];
   }
 
+  /** Every other player ("another player" / "each other player" wording). */
   opponentsOf(seat) {
     return this.players.filter((p) => p.seat !== seat).map((p) => p.seat);
+  }
+
+  /** Players the rules consider opponents: in team play your teammate is not one. */
+  enemiesOf(seat) {
+    if (!this.teamMode) return this.opponentsOf(seat);
+    return this.players.filter((p) => this.teamOf(p.seat) !== this.teamOf(seat)).map((p) => p.seat);
+  }
+
+  /** Team index (0/1) of a seat. Open team: partners sit adjacent; closed: across. */
+  teamOf(seat) {
+    if (!this.teamMode) return null;
+    return this.mode === "team-open" ? (seat < 2 ? 0 : 1) : seat % 2;
+  }
+
+  teamSeats(team) {
+    return this.players.filter((p) => this.teamOf(p.seat) === team).map((p) => p.seat);
+  }
+
+  teammateOf(seat) {
+    return this.teamSeats(this.teamOf(seat)).find((s) => s !== seat) ?? null;
+  }
+
+  teamName(team) {
+    return this.teamSeats(team)
+      .map((s) => this.player(s).name)
+      .join(" & ");
+  }
+
+  /** The deck a seat draws from (duel: their own deck). */
+  deckFor(seat) {
+    return this.duel ? this.playerDecks[seat] : this.deck;
+  }
+
+  /** Owning seat of a card instance (duel only; null in shared-deck modes). */
+  ownerOf(iid) {
+    return this.inst(iid).owner ?? null;
   }
 
   inPlay(iid) {
@@ -214,6 +275,12 @@ export class Game {
   removeFromZones(iid) {
     const d = this.deck.indexOf(iid);
     if (d >= 0) this.deck.splice(d, 1);
+    if (this.playerDecks) {
+      for (const pd of this.playerDecks) {
+        const i = pd.indexOf(iid);
+        if (i >= 0) pd.splice(i, 1);
+      }
+    }
     const x = this.discard.indexOf(iid);
     if (x >= 0) this.discard.splice(x, 1);
     for (const p of this.players) {
@@ -253,21 +320,29 @@ export class Game {
   toDeckBottom(iid, { silent = false } = {}) {
     this.removeFromZones(iid);
     this.leavePlayCleanup(iid);
-    this.deck.push(iid);
-    if (!silent) this.log(`${cards[this.inst(iid).num].name} is put on the bottom of the deck.`);
+    // duel: cards always go to the bottom of their OWNER's deck
+    const deck = this.duel ? this.playerDecks[this.ownerOf(iid)] : this.deck;
+    deck.push(iid);
+    if (!silent) {
+      const whose = this.duel ? `${this.player(this.ownerOf(iid)).name}'s deck` : "the deck";
+      this.log(`${cards[this.inst(iid).num].name} is put on the bottom of ${whose}.`);
+    }
     this.push();
   }
 
   drawCards(seat, n, silent = false) {
+    const deck = this.deckFor(seat); // duel: you always draw from your own deck
     let drawn = 0;
     for (let i = 0; i < n; i++) {
-      if (!this.deck.length) break;
-      const iid = this.deck.shift();
+      if (!deck.length) break;
+      const iid = deck.shift();
       this.player(seat).hand.push(iid);
       drawn++;
     }
     if (!silent && drawn) this.log(`${this.player(seat).name} draws ${drawn} card${drawn > 1 ? "s" : ""}.`);
-    if (!silent && drawn < n) this.log(`The deck is empty.`);
+    if (!silent && drawn < n) {
+      this.log(this.duel ? `${this.player(seat).name}'s deck is empty.` : `The deck is empty.`);
+    }
     this.push();
     return drawn;
   }
@@ -292,10 +367,12 @@ export class Game {
 
   // ---------- prompts ----------
 
+  /** seat may be a single seat or an array (team decisions: first answer wins). */
   prompt(seat, spec) {
+    const seats = Array.isArray(seat) ? seat : [seat];
     this.push();
     return new Promise((resolve) => {
-      this.pendingPrompt = { seat, spec, resolve };
+      this.pendingPrompt = { seat: seats[0], seats, spec, resolve };
       this.push();
     });
   }
@@ -303,7 +380,7 @@ export class Game {
   /** Called by the server when the prompted player responds. */
   answerPrompt(seat, answer) {
     const p = this.pendingPrompt;
-    if (!p || p.seat !== seat) return false;
+    if (!p || !p.seats.includes(seat)) return false;
     if (!this.validateAnswer(p.spec, answer)) return false;
     this.pendingPrompt = null;
     p.resolve(answer);
@@ -424,10 +501,37 @@ export class Game {
   // ---------- main loop ----------
 
   async run() {
+    if (this.mode === "team-closed") await this.closedTeamPass();
     while (this.phase !== "over") {
       this.round++;
       await this.playRound();
     }
+  }
+
+  /** Closed team setup: everyone picks 2 cards to pass face down to their
+   *  teammate; all transfers happen only after every pick (pass before look). */
+  async closedTeamPass() {
+    const picks = [];
+    for (const p of this.players) {
+      const iids = await this.chooseCards(p.seat, {
+        eligible: [...p.hand],
+        min: 2,
+        max: 2,
+        zone: "hand",
+        text: "Pass two cards face down to your teammate (you pass before seeing what they pass you).",
+      });
+      picks.push({ seat: p.seat, iids });
+    }
+    for (const { seat, iids } of picks) {
+      const mate = this.teammateOf(seat);
+      for (const iid of iids) {
+        const h = this.player(seat).hand;
+        h.splice(h.indexOf(iid), 1);
+        this.player(mate).hand.push(iid);
+      }
+    }
+    this.log("Each player passes two cards face down to their teammate.");
+    this.push();
   }
 
   async playRound() {
@@ -436,22 +540,41 @@ export class Game {
     this.aweSeat = null;
     this.corruptionDouble = false;
     this.afterScoringQueue = [];
+    this.roundFirstTeam = null;
     // first player: Honor (#15, latest) > Awe override > last round winner > previous first
     const honor = this.latestMoodOfNum(15);
+    let forcedFirst = null;
     if (honor != null && this.mood.get(honor).chosenPlayer != null) {
-      this.firstSeat = this.mood.get(honor).chosenPlayer;
+      forcedFirst = this.mood.get(honor).chosenPlayer;
     } else if (this.nextFirstOverride != null) {
-      this.firstSeat = this.nextFirstOverride;
-    } else if (this.lastWinnerSeat != null) {
-      this.firstSeat = this.lastWinnerSeat;
+      forcedFirst = this.nextFirstOverride;
     }
     this.nextFirstOverride = null;
-    this.log(`— Round ${this.round} begins. ${this.player(this.firstSeat).name} goes first. —`);
 
-    for (let i = 0; i < this.players.length; i++) {
-      const seat = (this.firstSeat + i) % this.players.length;
-      await this.takeTurn(seat);
+    if (this.mode === "team-open") {
+      await this.openTeamTurns(forcedFirst);
       if (this.phase === "over") return;
+    } else {
+      if (forcedFirst != null) {
+        this.firstSeat = forcedFirst;
+      } else if (this.teamMode && this.lastWinnerTeam != null) {
+        // closed team: the winning team chooses which member goes first
+        const seats = this.teamSeats(this.lastWinnerTeam);
+        this.firstSeat = await this.choosePlayer(seats, {
+          eligible: seats,
+          text: "Your team won the round — which of you goes first this round?",
+        });
+      } else if (!this.teamMode && this.lastWinnerSeat != null) {
+        this.firstSeat = this.lastWinnerSeat;
+      }
+      this.roundFirstTeam = this.teamOf(this.firstSeat);
+      this.log(`— Round ${this.round} begins. ${this.player(this.firstSeat).name} goes first. —`);
+
+      for (let i = 0; i < this.players.length; i++) {
+        const seat = (this.firstSeat + i) % this.players.length;
+        await this.takeTurn(seat);
+        if (this.phase === "over") return;
+      }
     }
     await this.scoreRound();
     // expire this round's Doubt restriction
@@ -462,6 +585,41 @@ export class Game {
     }
     // "played this round" flags reset naturally via playedRound comparison
     this.push();
+  }
+
+  /** Open team turn order: teams alternate, and each team decides per turn
+   *  which member plays (either teammate may answer the prompt). */
+  async openTeamTurns(forcedFirst) {
+    let firstTeam;
+    let firstTurnSeat = null;
+    if (forcedFirst != null) {
+      firstTeam = this.teamOf(forcedFirst);
+      firstTurnSeat = forcedFirst; // Honor/Awe name a specific player
+    } else if (this.lastWinnerTeam != null) {
+      firstTeam = this.lastWinnerTeam;
+    } else {
+      firstTeam = this.teamOf(this.firstSeat); // round 1: random first seat
+    }
+    this.roundFirstTeam = firstTeam;
+    this.log(`— Round ${this.round} begins. ${this.teamName(firstTeam)} go first. —`);
+
+    const played = new Set();
+    for (let i = 0; i < this.players.length; i++) {
+      const team = i % 2 === 0 ? firstTeam : 1 - firstTeam;
+      const remaining = this.teamSeats(team).filter((s) => !played.has(s));
+      let seat;
+      if (i === 0 && firstTurnSeat != null) seat = firstTurnSeat;
+      else if (remaining.length === 1) seat = remaining[0];
+      else
+        seat = await this.choosePlayer(remaining, {
+          eligible: remaining,
+          text: "Which of you takes this turn?",
+        });
+      if (i === 0) this.firstSeat = seat;
+      played.add(seat);
+      await this.takeTurn(seat);
+      if (this.phase === "over") return;
+    }
   }
 
   async takeTurn(seat) {
@@ -750,7 +908,7 @@ export class Game {
           this.log(`${this.player(seat).name} scores ${this.nameOf(pick)} an extra time (+${this.value(pick)}).`);
         }
       } else if (en === 97) {
-        const elig = this.opponentsOf(seat).flatMap((s) => this.moodsOf(s));
+        const elig = this.enemiesOf(seat).flatMap((s) => this.moodsOf(s));
         const pick = await this.chooseMood(seat, {
           eligible: elig,
           optional: true,
@@ -771,7 +929,7 @@ export class Game {
     // Effects resolve in the order they were played; when one player owns
     // several pending effects, that player chooses which of theirs goes next.
     const queue = [...this.afterScoringQueue].sort((a, b) => a.n - b.n);
-    const winnerNow = () => this.decideWinner(scores);
+    const winnerNow = () => this.winningSeats(scores);
     while (queue.length) {
       let item = queue[0];
       const mine = queue.filter((q) => q.seat === item.seat);
@@ -785,6 +943,11 @@ export class Game {
       }
       queue.splice(queue.indexOf(item), 1);
       await this.resolveAfterScoring(item, scores, winnerNow);
+    }
+
+    if (this.teamMode) {
+      await this.scoreTeamRound(scores);
+      return;
     }
 
     const winner = this.decideWinner(scores);
@@ -831,6 +994,62 @@ export class Game {
 
     this.phase = "playing";
     this.push();
+  }
+
+  /** Team modes: combined scores decide the round; teams win, not players. */
+  async scoreTeamRound(scores) {
+    const totals = [0, 1].map((t) => this.teamSeats(t).reduce((s, q) => s + scores[q], 0));
+    this.log(`${this.teamName(0)} score ${totals[0]} — ${this.teamName(1)} score ${totals[1]}.`);
+    const winTeam = this.decideWinnerTeam(scores);
+    const wins = this.corruptionDouble ? 2 : 1;
+    this.teamWins[winTeam] += wins;
+    this.lastWinnerTeam = winTeam;
+    this.lastWinnerSeat = null;
+    for (const p of this.players) p.roundWins = this.teamWins[this.teamOf(p.seat)];
+    this.log(
+      `${this.teamName(winTeam)} win round ${this.round}${wins > 1 ? " (counts as two wins — Corruption)" : ""}! (${this.teamWins[0]} – ${this.teamWins[1]})`
+    );
+
+    if (this.teamWins[winTeam] >= 3) {
+      this.phase = "over";
+      this.gameWinnerTeam = winTeam;
+      this.gameWinner = this.teamSeats(winTeam)[0];
+      this.log(`🏆 ${this.teamName(winTeam)} win the game!`);
+      this.push();
+      this.onGameOver(this.gameWinner);
+      return;
+    }
+
+    // the losing team draws one card and decides which player gets it
+    // (open team may look at it first; closed team must assign it blind)
+    const loseSeats = this.teamSeats(1 - winTeam);
+    if (this.deck.length) {
+      const text =
+        this.mode === "team-open"
+          ? `Your team draws ${this.nameOf(this.deck[0])}. Who gets it?`
+          : "Your team draws one card (no peeking before you choose). Who gets it?";
+      const to = await this.choosePlayer(loseSeats, { eligible: loseSeats, text });
+      this.drawCards(to, 1);
+    } else {
+      this.log("The deck is empty — no card for the losing team.");
+    }
+
+    // Hurt Feelings is not used in team games
+    this.phase = "playing";
+    this.push();
+  }
+
+  decideWinnerTeam(scores) {
+    const totals = [0, 1].map((t) => this.teamSeats(t).reduce((s, q) => s + scores[q], 0));
+    if (totals[0] !== totals[1]) return totals[0] > totals[1] ? 0 : 1;
+    // tie: whichever team played first this round wins it
+    return this.roundFirstTeam ?? 0;
+  }
+
+  /** Seats currently winning the round (one seat, or both members of a team). */
+  winningSeats(scores) {
+    if (this.teamMode) return this.teamSeats(this.decideWinnerTeam(scores));
+    return [this.decideWinner(scores)];
   }
 
   decideWinner(scores) {
@@ -889,7 +1108,7 @@ export class Game {
       }
       case "bashfulness": {
         if (!this.inPlay(item.iid)) break;
-        if (winnerNow() === this.controllerOf(item.iid)) {
+        if (winnerNow().includes(this.controllerOf(item.iid))) {
           const seat = this.controllerOf(item.iid);
           this.toDeckBottom(item.iid);
           this.drawCards(seat, 1);
@@ -944,6 +1163,7 @@ export class Game {
         secondary: printed.secondary,
         effect: printed.effect,
         bang: printed.bang,
+        owner: this.duel ? this.ownerOf(iid) : null,
         ...(m
           ? {
               copyOf: m.copyOf,
@@ -961,32 +1181,49 @@ export class Game {
       };
     };
     const livePrompt =
-      this.pendingPrompt && this.pendingPrompt.seat === seat
+      this.pendingPrompt && this.pendingPrompt.seats.includes(seat)
         ? this.serializePrompt(this.pendingPrompt.spec)
         : null;
+    // hand cards of OTHER players that this seat may see:
+    // duel — borrowed cards (owned by someone else) are public knowledge;
+    // open team — your teammate's whole hand is open information
+    const revealedFor = (p) => {
+      if (p.seat === seat) return [];
+      if (this.duel) return p.hand.filter((iid) => this.ownerOf(iid) !== p.seat);
+      if (this.mode === "team-open" && this.teamOf(p.seat) === this.teamOf(seat)) return [...p.hand];
+      return [];
+    };
     return {
       seat,
+      mode: this.mode,
       phase: this.phase,
       round: this.round,
       activeSeat: this.activeSeat,
       firstSeat: this.firstSeat,
-      deckCount: this.deck.length,
+      deckCount: this.deckFor(seat).length,
       discard: this.discard.map(cardPub),
       doubt: this.doubtColors && this.doubtColors.round === this.round ? this.doubtColors.colors : null,
+      teams: this.teamMode ? [this.teamSeats(0), this.teamSeats(1)] : null,
+      teamWins: this.teamMode ? [...this.teamWins] : null,
       players: this.players.map((p) => ({
         seat: p.seat,
         name: p.name,
+        team: this.teamOf(p.seat),
         roundWins: p.roundWins,
         handCount: p.hand.length,
+        deckCount: this.duel ? this.playerDecks[p.seat].length : undefined,
         hurtFeelings: p.hurtFeelings,
         score: p.moods.reduce((s, m) => s + this.value(m), 0),
         moods: p.moods.map(cardPub),
+        revealed: revealedFor(p).map(cardPub),
       })),
       hand: me.hand.map(cardPub),
       prompt: livePrompt,
       waitingOn: this.pendingPrompt ? this.pendingPrompt.seat : null,
+      waitingOnSeats: this.pendingPrompt ? [...this.pendingPrompt.seats] : null,
       log: this.logLines.slice(-100),
       gameWinner: this.gameWinner,
+      gameWinnerTeam: this.gameWinnerTeam,
     };
   }
 

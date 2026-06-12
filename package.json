@@ -7,9 +7,10 @@
   "scripts": {
     "scrape": "node scripts/scrape-cards.js",
     "start": "node server/index.js",
-    "test": "node --test test/fuzz.test.js"
+    "test": "node --test test/fuzz.test.js test/match.test.js"
   },
   "dependencies": {
+    "better-sqlite3": "^12.10.0",
     "express": "^4.19.0",
     "socket.io": "^4.7.0"
   }
