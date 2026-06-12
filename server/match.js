@@ -322,6 +322,7 @@ export class Match {
 
   stateFor(seat) {
     return {
+      seat,
       mode: this.mode,
       modeLabel: this.def.label,
       kind: this.def.kind,

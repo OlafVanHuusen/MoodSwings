@@ -13,7 +13,8 @@ const COLOR_HEX = {
   Green: "#5fc278",
 };
 
-let S = null; // latest state
+let S = null; // latest game state
+let M = null; // latest match state (mode, draft phases, bo3 score)
 let sel = new Set(); // current multi-select (iids)
 let overlayMode = null; // 'browse' | 'pick'
 
@@ -35,9 +36,20 @@ socket.on("gameState", (state) => {
   render();
 });
 
+socket.on("matchState", (m) => {
+  M = m;
+  render();
+});
+
 /* ---------------- rendering ---------------- */
 
 function render() {
+  // match phases (drafting, deck building, bo3 finale) replace the table;
+  // a finished single game keeps the table + its own victory screen
+  if (M && M.phase !== "game" && !(M.phase === "over" && !M.bo3)) return renderMatch();
+  $("match-view").hidden = true;
+  $("board").hidden = false;
+  document.querySelector(".me").hidden = false;
   if (!S) return;
   renderTopbar();
   renderOpponents();
@@ -52,6 +64,14 @@ function render() {
 
 function renderTopbar() {
   $("round-info").textContent = S.phase === "scoring" ? `Round ${S.round} — scoring` : `Round ${S.round}`;
+  const mi = $("match-info");
+  if (M && M.bo3) {
+    mi.hidden = false;
+    mi.textContent = `${M.modeLabel} · game ${M.gameNo} · wins ${M.gameWins[S.seat]}–${M.gameWins[1 - S.seat]}`;
+  } else if (M && M.mode !== "classic") {
+    mi.hidden = false;
+    mi.textContent = M.modeLabel;
+  } else mi.hidden = true;
   const doubt = $("doubt-banner");
   if (S.doubt && S.doubt.length) {
     doubt.hidden = false;
@@ -60,15 +80,24 @@ function renderTopbar() {
 
   const seats = $("seats");
   seats.innerHTML = "";
-  for (const p of S.players) {
+  // team modes: show the players grouped by team, teammates side by side
+  const ordered = S.teams ? [...S.teams[0], ...S.teams[1]].map((s) => S.players[s]) : S.players;
+  ordered.forEach((p, i) => {
+    if (S.teams && i === S.teams[0].length) {
+      const vs = document.createElement("span");
+      vs.className = "vs";
+      vs.textContent = "vs";
+      seats.appendChild(vs);
+    }
     const d = document.createElement("div");
     d.className = "seat" + (p.seat === S.activeSeat ? " active" : "") + (p.seat === S.seat ? " me" : "");
+    if (p.team != null) d.classList.add(`team-${p.team}`);
     d.innerHTML = `<span class="seat-name">${esc(p.name)}${p.seat === S.seat ? " (you)" : ""}</span>
       <span class="pips">${[0, 1, 2].map((i) => `<span class="pip${i < p.roundWins ? " won" : ""}"></span>`).join("")}</span>
       <span class="score">${p.score}</span>
       ${p.hurtFeelings ? '<span class="hf">HF</span>' : ""}`;
     seats.appendChild(d);
-  }
+  });
 }
 
 function cardEl(c, { width, showValue = true, suppressible = true } = {}) {
@@ -126,22 +155,37 @@ function renderOpponents() {
   wrap.innerHTML = "";
   for (const p of S.players) {
     if (p.seat === S.seat) continue;
+    const isPartner = S.teams && p.team === S.players.find((q) => q.seat === S.seat)?.team;
     const d = document.createElement("div");
-    d.className = "opp" + (p.seat === S.activeSeat ? " active" : "");
+    d.className = "opp" + (p.seat === S.activeSeat ? " active" : "") + (isPartner ? " partner" : "");
     d.dataset.seat = p.seat;
-    d.innerHTML = `<div class="opp-head"><span class="nm">${esc(p.name)}</span>
-      <span class="hand-count">🂠 ${p.handCount} in hand</span>
+    const deckInfo = p.deckCount != null ? ` · deck ${p.deckCount}` : "";
+    d.innerHTML = `<div class="opp-head"><span class="nm">${esc(p.name)}${isPartner ? " (teammate)" : ""}</span>
+      <span class="hand-count">🂠 ${p.handCount} in hand${deckInfo}</span>
       <span class="total">${p.score}</span></div>`;
     const row = document.createElement("div");
     row.className = "moodrow";
     renderMoodRow(row, p.moods, "no moods yet");
     d.appendChild(row);
+    // cards in their hand we're allowed to see (open-team partner: everything;
+    // duel: cards they're holding that belong to the other deck)
+    if (p.revealed?.length) {
+      const lbl = document.createElement("div");
+      lbl.className = "revealed-label";
+      lbl.textContent = isPartner ? "their hand (open)" : "known cards in their hand";
+      d.appendChild(lbl);
+      const rrow = document.createElement("div");
+      rrow.className = "moodrow revealed-row";
+      for (const c of p.revealed) rrow.appendChild(cardEl(c, { showValue: false }));
+      d.appendChild(rrow);
+    }
     wrap.appendChild(d);
   }
 }
 
 function renderPiles() {
   $("deck-count").textContent = S.deckCount;
+  document.querySelector("#deck-pile .pile-label").textContent = S.mode === "duel" ? "your deck" : "deck";
   $("discard-count").textContent = S.discard.length;
   const top = $("discard-top");
   top.innerHTML = "";
@@ -171,8 +215,10 @@ function renderStatus() {
     return;
   }
   if (S.waitingOn != null) {
-    const who = S.players.find((p) => p.seat === S.waitingOn);
-    el.innerHTML = `<span class="waiting">Waiting for ${esc(who?.name ?? "...")} …</span>`;
+    const names = (S.waitingOnSeats ?? [S.waitingOn])
+      .map((s) => S.players.find((p) => p.seat === s)?.name ?? "...")
+      .join(" or ");
+    el.innerHTML = `<span class="waiting">Waiting for ${esc(names)} …</span>`;
     return;
   }
   el.innerHTML = '<span class="waiting">…</span>';
@@ -202,17 +248,50 @@ function renderMyMoods() {
 function renderHand() {
   const wrap = $("my-hand");
   wrap.innerHTML = "";
-  for (const c of S.hand) wrap.appendChild(cardEl(c, { showValue: false }));
+  for (const c of S.hand) {
+    const el = cardEl(c, { showValue: false });
+    // duel: a borrowed card (it goes back to its owner's deck) is public info
+    if (c.owner != null && c.owner !== S.seat) {
+      const t = document.createElement("span");
+      t.className = "tag";
+      t.textContent = "theirs";
+      el.appendChild(t);
+    }
+    wrap.appendChild(el);
+  }
 }
 
 function renderGameOver() {
   const go = $("gameover");
+  // best-of-three: the match layer owns the final screen (shown between games)
+  if (M?.bo3) {
+    go.hidden = true;
+    return;
+  }
   if (S.phase !== "over" || S.gameWinner == null) {
     go.hidden = true;
     return;
   }
-  const w = S.players.find((p) => p.seat === S.gameWinner);
+  let title, sub;
+  if (S.gameWinnerTeam != null) {
+    const names = S.teams[S.gameWinnerTeam].map((s) => S.players.find((p) => p.seat === s).name);
+    const mine = S.teams[S.gameWinnerTeam].includes(S.seat);
+    title = names.join(" & ");
+    sub = mine
+      ? "Your team won three rounds. Excellent mood management."
+      : `${title} won three rounds as a team.`;
+  } else {
+    const w = S.players.find((p) => p.seat === S.gameWinner);
+    title = w.name;
+    sub = S.gameWinner === S.seat ? "You won three rounds. Excellent mood management." : `${w.name} won three rounds.`;
+  }
+  showVictory(title, sub);
+}
+
+function showVictory(title, sub) {
+  const go = $("gameover");
   go.hidden = false;
+  const w = { name: title };
   const nm = $("winner-name");
   nm.innerHTML = "";
   [...w.name].forEach((ch, i) => {
@@ -224,8 +303,7 @@ function renderGameOver() {
     s.style.animationDelay = `${i * 0.06}s`;
     nm.appendChild(s);
   });
-  $("winner-sub").textContent =
-    S.gameWinner === S.seat ? "You won three rounds. Excellent mood management." : `${w.name} won three rounds.`;
+  $("winner-sub").textContent = sub;
 }
 
 /* ---------------- prompts ---------------- */
@@ -534,6 +612,138 @@ function positionZoom(e) {
   if (x + 290 > window.innerWidth) x = e.clientX - 290 - pad;
   z.style.left = `${x}px`;
   z.style.top = `${Math.max(10, y)}px`;
+}
+
+/* ---------------- match phases (draft / build / sideboard / finale) ---------------- */
+
+let matchSel = new Set();
+let matchPromptKey = null;
+
+function matchCardEl(c, opts) {
+  return cardEl({ ...c, iid: c.id }, opts);
+}
+
+function matchAnswer(a) {
+  $("match-prompt-text").textContent = "…";
+  $("match-grid").innerHTML = "";
+  $("match-actions").innerHTML = "";
+  socket.emit("promptAnswer", a);
+}
+
+function renderMatch() {
+  $("board").hidden = true;
+  document.querySelector(".me").hidden = true;
+  $("prompt-sheet").hidden = true;
+  $("match-view").hidden = false;
+  $("match-info").hidden = true;
+
+  const opp = M.players.find((p) => p.seat !== M.seat);
+  $("match-title").textContent = M.modeLabel;
+  const subBits = [];
+  if (M.bo3 && M.gameNo > 0) {
+    subBits.push(`Game wins: you ${M.gameWins[M.seat]} – ${M.gameWins[1 - M.seat]} ${opp?.name ?? "opponent"}`);
+  }
+  if (M.phase === "draft") subBits.push("Drafting…");
+  if (M.phase === "build") subBits.push("Deck building");
+  if (M.phase === "sideboard") subBits.push(`Sideboarding before game ${M.gameNo + 1}`);
+  $("match-sub").textContent = subBits.join(" · ");
+
+  // your drafted pool so far
+  const poolwrap = $("match-poolwrap");
+  if (M.pool && M.pool.length && M.phase === "draft") {
+    poolwrap.hidden = false;
+    $("match-pool-label").textContent = `Your drafted cards (${M.pool.length})`;
+    const poolEl = $("match-pool");
+    poolEl.innerHTML = "";
+    for (const c of M.pool) poolEl.appendChild(matchCardEl(c, { showValue: false }));
+  } else poolwrap.hidden = true;
+
+  if (M.phase === "over") {
+    const winner = M.players.find((p) => p.seat === M.matchWinner);
+    const mine = M.matchWinner === M.seat;
+    const score = M.bo3 && M.gameNo > 0 ? ` ${M.gameWins[M.matchWinner]}–${M.gameWins[1 - M.matchWinner]}` : "";
+    showVictory(winner.name, mine ? `You win the match${score}!` : `${winner.name} wins the match${score}.`);
+    $("match-prompt-text").textContent = "";
+    $("match-grid").innerHTML = "";
+    $("match-actions").innerHTML = "";
+    return;
+  }
+  $("gameover").hidden = true;
+
+  const p = M.prompt;
+  const key = p ? `${p.type}:${(p.cards ?? p.pool ?? []).map((c) => c.id).join(",")}:${p.pileIndex ?? ""}` : null;
+  if (key !== matchPromptKey) {
+    matchPromptKey = key;
+    matchSel = new Set(p?.type === "trim" ? p.pool.map((c) => c.id) : []);
+  }
+
+  const ptext = $("match-prompt-text");
+  const grid = $("match-grid");
+  const actions = $("match-actions");
+  grid.innerHTML = "";
+  actions.innerHTML = "";
+  if (!p) {
+    ptext.textContent = `Waiting for ${opp?.name ?? "your opponent"} …`;
+    return;
+  }
+  ptext.textContent = p.text;
+
+  if (p.type === "draftPick") {
+    const confirm = btn(`Keep these (0/${p.pick})`, () => matchAnswer({ ids: [...matchSel] }), "primary");
+    confirm.disabled = true;
+    for (const c of p.cards) {
+      const el = matchCardEl(c, { showValue: false });
+      el.classList.add("eligible");
+      el.classList.toggle("selected", matchSel.has(c.id));
+      el.onclick = () => {
+        if (matchSel.has(c.id)) matchSel.delete(c.id);
+        else if (matchSel.size < p.pick) matchSel.add(c.id);
+        el.classList.toggle("selected", matchSel.has(c.id));
+        confirm.disabled = matchSel.size !== p.pick;
+        confirm.textContent = `Keep these (${matchSel.size}/${p.pick})`;
+      };
+      grid.appendChild(el);
+    }
+    confirm.disabled = matchSel.size !== p.pick;
+    confirm.textContent = `Keep these (${matchSel.size}/${p.pick})`;
+    actions.appendChild(confirm);
+  } else if (p.type === "winston") {
+    const info = document.createElement("span");
+    info.className = "hint";
+    info.textContent = `Piles: ${p.pileSizes.map((n, i) => `${i + 1}→${n}`).join("  ")} · deck ${p.deckCount}`;
+    for (const c of p.cards) grid.appendChild(matchCardEl(c, { showValue: false }));
+    actions.appendChild(info);
+    actions.appendChild(
+      btn(`Take pile ${p.pileIndex + 1} (${p.cards.length})`, () => matchAnswer({ take: true }), "primary")
+    );
+    const pass = btn(
+      p.pileIndex < 2 ? `Pass (look at pile ${p.pileIndex + 2})` : p.deckCount ? "Pass (draw from the deck)" : "Pass",
+      () => matchAnswer({ take: false })
+    );
+    pass.disabled = !p.canSkip;
+    actions.appendChild(pass);
+  } else if (p.type === "trim") {
+    const minKeep = Math.max(p.min, p.maxRemove != null ? p.pool.length - p.maxRemove : 0);
+    const confirm = btn("", () => matchAnswer({ ids: [...matchSel] }), "primary");
+    const sync = () => {
+      confirm.disabled = matchSel.size < minKeep;
+      confirm.textContent = `Use these ${matchSel.size} cards${matchSel.size < minKeep ? ` (need ${minKeep}+)` : ""}`;
+    };
+    for (const c of p.pool) {
+      const el = matchCardEl(c, { showValue: false });
+      el.classList.add("eligible");
+      el.classList.toggle("selected", matchSel.has(c.id));
+      el.onclick = () => {
+        if (matchSel.has(c.id)) matchSel.delete(c.id);
+        else matchSel.add(c.id);
+        el.classList.toggle("selected", matchSel.has(c.id));
+        sync();
+      };
+      grid.appendChild(el);
+    }
+    sync();
+    actions.appendChild(confirm);
+  }
 }
 
 /* ---------------- util ---------------- */
