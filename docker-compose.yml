@@ -1,0 +1,24 @@
+services:
+  moodswings:
+    build: .
+    image: moodswings:local
+    container_name: moodswings
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      # Uncomment when serving through an HTTPS reverse proxy (Caddy/nginx/Traefik):
+      # COOKIE_SECURE: "1"   # session cookie gets the Secure flag
+      # TRUST_PROXY: "1"     # trust X-Forwarded-For from the proxy
+    volumes:
+      # cards.json + app.db (SQLite) — must be writable by the container user
+      - ./data:/app/data
+      # scraped card scans; written once by `npm run scrape`
+      - ./public/cards:/app/public/cards
+    # hardening: immutable root filesystem, no privilege escalation
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true

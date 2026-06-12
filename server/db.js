@@ -1,13 +1,21 @@
 // SQLite persistence: user accounts, login sessions, and saved decks.
 import Database from "better-sqlite3";
 import crypto from "node:crypto";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { POOL } from "./gamedata.js";
+import { config } from "./config.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const db = new Database(path.join(__dirname, "..", "data", "app.db"));
-db.pragma("journal_mode = WAL");
+mkdirSync(config.dataDir, { recursive: true });
+const db = new Database(path.join(config.dataDir, "app.db"));
+try {
+  db.pragma("journal_mode = WAL");
+} catch {
+  // WAL needs mmap'd shared memory, which some mounted filesystems
+  // (network shares, Docker Desktop bind mounts) don't provide
+  db.pragma("journal_mode = TRUNCATE");
+  console.warn("SQLite WAL unavailable on this filesystem; using TRUNCATE journal mode.");
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -44,8 +52,8 @@ export function createUser(username, password) {
   if (!/^[\w-]{2,20}$/.test(username)) {
     throw new ApiError("Username must be 2–20 letters, digits, _ or -.");
   }
-  if (typeof password !== "string" || password.length < 4) {
-    throw new ApiError("Password must be at least 4 characters.");
+  if (typeof password !== "string" || password.length < 8) {
+    throw new ApiError("Password must be at least 8 characters.");
   }
   const salt = crypto.randomBytes(16).toString("hex");
   try {
@@ -81,10 +89,21 @@ export function userForSession(sessionId) {
   if (!sessionId) return null;
   const row = db
     .prepare(
-      "SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?"
+      `SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id
+       WHERE s.id = ? AND s.created_at > datetime('now', ?)`
     )
-    .get(sessionId);
+    .get(sessionId, `-${config.sessionTtlDays} days`);
   return row || null;
+}
+
+export function purgeExpiredSessions() {
+  db.prepare("DELETE FROM sessions WHERE created_at <= datetime('now', ?)").run(
+    `-${config.sessionTtlDays} days`
+  );
+}
+
+export function closeDb() {
+  db.close();
 }
 
 // ---- decks ----

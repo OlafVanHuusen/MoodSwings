@@ -12,7 +12,9 @@ import {
   updateDeck,
   userForSession,
 } from "./db.js";
-import { cards, POOL } from "./gamedata.js";
+import { POOL, publicCard } from "./gamedata.js";
+import { config } from "./config.js";
+import { rateLimit } from "./security.js";
 
 const SESSION_COOKIE = "msw_session";
 
@@ -44,20 +46,24 @@ function requireAuth(req, res, next) {
   next();
 }
 
-function setSessionCookie(res, sessionId) {
+function setSessionCookie(res, sessionId, maxAge = 60 * 60 * 24 * config.sessionTtlDays) {
+  const secure = config.cookieSecure ? "; Secure" : "";
   res.setHeader(
     "Set-Cookie",
-    `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 365}`
+    `${SESSION_COOKIE}=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
   );
 }
 
-api.post("/register", (req, res) => {
+// shared window: registration + failed logins both count against it
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20 });
+
+api.post("/register", authLimiter, (req, res) => {
   const user = createUser(req.body?.username, req.body?.password);
   setSessionCookie(res, createSession(user.id));
   res.json({ user });
 });
 
-api.post("/login", (req, res) => {
+api.post("/login", authLimiter, (req, res) => {
   const user = checkLogin(req.body?.username, req.body?.password);
   if (!user) return res.status(401).json({ error: "Wrong username or password." });
   setSessionCookie(res, createSession(user.id));
@@ -66,7 +72,7 @@ api.post("/login", (req, res) => {
 
 api.post("/logout", (req, res) => {
   if (req.sessionId) destroySession(req.sessionId);
-  res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  setSessionCookie(res, "", 0);
   res.json({ ok: true });
 });
 
@@ -76,22 +82,7 @@ api.get("/me", (req, res) => {
 
 // public card catalog for the deck builder
 api.get("/cards", (req, res) => {
-  res.json({
-    cards: POOL.map((n) => {
-      const c = cards[n];
-      return {
-        num: c.num,
-        name: c.name,
-        color: c.color,
-        rarity: c.rarity,
-        primary: c.primary,
-        secondary: c.secondary,
-        effect: c.effect,
-        bang: c.bang,
-        image: c.image,
-      };
-    }),
-  });
+  res.json({ cards: POOL.map(publicCard) });
 });
 
 api.get("/decks", requireAuth, (req, res) => {

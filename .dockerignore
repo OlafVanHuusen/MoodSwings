@@ -1,0 +1,14 @@
+# keep the build context lean; scraped assets and state come from volumes
+node_modules
+data
+public/cards
+.git
+.idea
+.claude
+docs
+test
+*.md
+LICENSE
+bash.exe.stackdump
+Dockerfile
+docker-compose.yml

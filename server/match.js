@@ -1,10 +1,10 @@
-// Match orchestration: everything between "room is full" and "someone won".
+﻿// Match orchestration: everything between "room is full" and "someone won".
 // Wraps the Game engine with mode-specific flows — single games for classic /
 // duel / team play, and draft → build → best-of-three (with sideboarding)
 // for the draft formats. Draft-phase prompts live here, not in the engine,
 // because they need to run for both players simultaneously.
 import { Game } from "./engine/game.js";
-import { buildDeck, cards, shuffle } from "./gamedata.js";
+import { buildDeck, publicCard, shuffle } from "./gamedata.js";
 
 export const MODES = {
   classic: { label: "Classic", players: [2, 3, 4], auth: false, kind: "shared" },
@@ -28,21 +28,6 @@ export function deckProblem(modeId, deckCards) {
   }
   return null;
 }
-
-const cardInfo = (num) => {
-  const c = cards[num];
-  return {
-    num: c.num,
-    name: c.name,
-    color: c.color,
-    rarity: c.rarity,
-    primary: c.primary,
-    secondary: c.secondary,
-    effect: c.effect,
-    bang: c.bang,
-    image: c.image,
-  };
-};
 
 let DRAFT_ID = 0;
 const draftCard = (num) => ({ id: ++DRAFT_ID, num });
@@ -216,7 +201,7 @@ export class Match {
             type: "draftPick",
             round,
             step: 1,
-            cards: dealt[s].map((c) => ({ ...c, ...cardInfo(c.num) })),
+            cards: dealt[s].map((c) => ({ ...c, ...publicCard(c.num) })),
             pick: 2,
             text: `Draft round ${round} of 4 — keep two of these six. The other four are passed to your opponent.`,
           })
@@ -234,7 +219,7 @@ export class Match {
             type: "draftPick",
             round,
             step: 2,
-            cards: passed[1 - s].map((c) => ({ ...c, ...cardInfo(c.num) })),
+            cards: passed[1 - s].map((c) => ({ ...c, ...publicCard(c.num) })),
             pick: 2,
             text: `Round ${round} — your opponent passed you these four. Keep two; the others are discarded face down.`,
           })
@@ -272,7 +257,7 @@ export class Match {
           pileIndex: pi,
           pileSizes: piles.map((p) => p.length),
           deckCount: deck.length,
-          cards: piles[pi].map((c) => ({ ...c, ...cardInfo(c.num) })),
+          cards: piles[pi].map((c) => ({ ...c, ...publicCard(c.num) })),
           canSkip,
           text: `Pile ${pi + 1} (only you can see it). Take all ${piles[pi].length} card${piles[pi].length > 1 ? "s" : ""}, or pass to ${canSkip ? (laterPiles || deck.length ? "look further" : "draw") : "—"}?`,
         });
@@ -307,7 +292,7 @@ export class Match {
         }
         const a = await this.prompt(s, {
           type: "trim",
-          pool: pool.map((c) => ({ ...c, ...cardInfo(c.num) })),
+          pool: pool.map((c) => ({ ...c, ...publicCard(c.num) })),
           min: 12,
           maxRemove: phase === "build" && this.mode === "quickdraft" ? 4 : null,
           text,
@@ -331,7 +316,7 @@ export class Match {
       bo3: this.bo3,
       gameWins: this.bo3 ? [...this.gameWins] : null,
       gameNo: this.gameNo,
-      pool: this.def.kind === "draft" ? this.pools[seat]?.map((c) => ({ ...c, ...cardInfo(c.num) })) : null,
+      pool: this.def.kind === "draft" ? this.pools[seat]?.map((c) => ({ ...c, ...publicCard(c.num) })) : null,
       poolCounts: this.def.kind === "draft" ? this.pools.map((p) => p.length) : null,
       prompt: this.pending.get(seat)?.spec ?? null,
       waitingOnSeats: [...this.pending.keys()],

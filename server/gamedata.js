@@ -1,10 +1,18 @@
 // Loads and normalizes the scraped card data.
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { config } from "./config.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const raw = JSON.parse(readFileSync(path.join(__dirname, "..", "data", "cards.json"), "utf8"));
+const cardsPath = path.join(config.dataDir, "cards.json");
+let raw;
+try {
+  raw = JSON.parse(readFileSync(cardsPath, "utf8"));
+} catch (e) {
+  throw new Error(
+    `Cannot read card data at ${cardsPath} — run \`npm run scrape\` first ` +
+      `(or mount your data directory). Original error: ${e.message}`
+  );
+}
 
 export const COLORS = ["White", "Blue", "Black", "Red", "Green"];
 
@@ -33,6 +41,22 @@ for (const c of raw) {
 export const POOL = Object.values(cards)
   .filter((c) => c.num !== 134)
   .map((c) => c.num);
+
+/** Client-facing card projection (deck builder catalog, draft specs). */
+export function publicCard(num) {
+  const c = cards[num];
+  return {
+    num: c.num,
+    name: c.name,
+    color: c.color,
+    rarity: c.rarity,
+    primary: c.primary,
+    secondary: c.secondary,
+    effect: c.effect,
+    bang: c.bang,
+    image: c.image,
+  };
+}
 
 const RARITY_COUNTS = { Common: 23, Uncommon: 14, Rare: 6, Mythic: 2 };
 

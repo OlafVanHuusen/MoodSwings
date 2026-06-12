@@ -4,6 +4,9 @@
   "description": "Local multiplayer web version of the Mood Swings card game (personal fan project)",
   "type": "module",
   "main": "server/index.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "scrape": "node scripts/scrape-cards.js",
     "start": "node server/index.js",

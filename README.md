@@ -29,6 +29,10 @@ full and everyone is redirected to the game page.
 
 ## What's implemented
 
+- **All seven game modes**: Classic (2–4, shared deck), Structure Duel and Power
+  Duel (own saved decks), Quick Draft and Winston Draft (draft in-game, best of
+  three with sideboarding), and Open/Closed Team play (2v2). Everything except
+  Classic uses accounts (username + password) with a deck builder at `/decks`.
 - Full rules engine, server-authoritative: turn structure (play one card or pass),
   "To play this card" costs, "After playing this mood" effects, "While in play"
   continuous effects, suppression (incl. durations), value recomputation, copies
@@ -47,13 +51,61 @@ full and everyone is redirected to the game page.
 ```
 scripts/scrape-cards.js   scraper (moodiest.app -> data/cards.json + public/cards/)
 data/cards.json           scraped card data (created by npm run scrape)
-server/index.js           Express + Socket.IO server, lobby management
+server/index.js           HTTP + Socket.IO wiring, graceful shutdown
+server/config.js          all env-tunable settings in one place
+server/lobby.js           rooms, join codes, reconnect tokens, room reaping
+server/match.js           mode catalog, drafts, best-of-three + sideboard
+server/api.js + db.js     REST auth & saved decks (SQLite, scrypt)
+server/security.js        security headers (CSP etc.) + login rate limiting
 server/gamedata.js        card data normalization + deck building
 server/engine/game.js     core game engine (zones, turns, scoring, prompts)
 server/engine/effects.js  all 134 card implementations
-public/                   landing page + game table UI (vanilla JS)
-test/fuzz.test.js         headless fuzz: plays full random games, checks invariants
+public/                   landing / deck builder / game table UI (vanilla JS)
+test/                     headless fuzz suites: full random games + match layer
 ```
+
+## Deployment (Docker Compose)
+
+The app ships as a single container; card data and the SQLite database live in
+volumes so the image itself contains no scraped content.
+
+```sh
+# 1. get the card data into ./data and ./public/cards (either of these):
+npm install && npm run scrape                     # on any machine with Node 22
+docker compose run --rm moodswings npm run scrape # or inside the container
+
+# 2. start it
+docker compose up -d --build
+```
+
+The server listens on port 3000 (change the `ports:` mapping in
+`docker-compose.yml`). State to back up: the `./data` directory.
+
+On the host, `./data` must be writable by the container user (uid 1000, the
+`node` user) — `chown -R 1000:1000 data` if your server user has a different uid.
+
+### Behind a reverse proxy (recommended for anything beyond your LAN)
+
+Accounts use session cookies, so if you expose the game outside your network put
+it behind HTTPS (Caddy, nginx, Traefik) and uncomment in `docker-compose.yml`:
+
+- `COOKIE_SECURE: "1"` — session cookie only sent over HTTPS
+- `TRUST_PROXY: "1"` — rate limiting sees real client IPs via `X-Forwarded-For`
+
+The proxy must forward WebSocket upgrades (Caddy does by default; for nginx set
+the usual `Upgrade`/`Connection` headers on `/socket.io/`).
+
+### Environment variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PORT` | `3000` | listen port inside the container |
+| `DATA_DIR` | `./data` | location of `cards.json` + `app.db` |
+| `SESSION_TTL_DAYS` | `365` | login session lifetime |
+| `MAX_ROOMS` | `200` | cap on concurrent lobby rooms |
+| `ROOM_REAP_MINUTES` | `60` | delete finished/abandoned rooms after this idle time |
+| `COOKIE_SECURE` | off | set `1` when serving over HTTPS |
+| `TRUST_PROXY` | off | set `1` when behind a reverse proxy |
 
 ## Tests
 
